@@ -2,7 +2,6 @@ import os
 import sys
 import time
 import httpx
-import psutil
 import signal
 import threading
 import win32api
@@ -23,13 +22,14 @@ class NetworkResult(Enum):
 class ESurfingDaemon(object):
     def __init__(self):
         default = "C:/Program Files (x86)/Chinatelecom_GDPortal/EsurfingClient.exe"
-        timeout = int(os.environ.get("ESURFING_TIMEOUR", 30))
+        self.timeout = int(os.environ.get("ESURFING_TIMEOUT", 30))
+        self.retry = int(os.environ.get("ESURFING_RETRY", 3))
         self.interval = int(os.environ.get("ESURFING_INTERVAL", 15))
         self.server = os.environ.get("ESURFING_SERVER", "http://223.5.5.5/")
         self.executable = os.environ.get("ESURFING_EXECUTABLE", default)
         self.hwnd = None
         self.shell = win32com.client.Dispatch('WScript.Shell')
-        self.client = httpx.Client(timeout=timeout)
+        self.client = httpx.Client(timeout=self.timeout)
         self.running = True
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -49,7 +49,9 @@ class ESurfingDaemon(object):
         os.system('taskkill /f /im ESurfingClient.exe >nul 2>&1')
 
     @staticmethod
-    def signal_handler(sig, frame):
+    def signal_handler(_, __):
+        os.system("pssuspend -r ESurfingClient.exe >nul 2>&1")
+        os.system("pssuspend64 -r ESurfingClient.exe >nul 2>&1")
         sys.exit(0)
 
     def check(self, url, disable=False):
@@ -80,27 +82,29 @@ class ESurfingDaemon(object):
             continue
         self.hwnd = win32gui.FindWindow("wkeWebWindow", '校园客户端')
         thread = threading.Thread(target=self.login)
+        now = time.time()
         logger.info('Logining...')
         thread.start()
-        while self.check(self.server, True) is not NetworkResult.NORMAL:
+        while self.check(self.server, True) is not NetworkResult.NORMAL and time.time() - now < self.timeout:
             time.sleep(0.5)
         self.running = False
-        pid = None
         win32gui.ShowWindow(self.hwnd, SW_MINIMIZE)
-        for i in psutil.process_iter():
-            if i.name() == "EsurfingClient.exe":
-                pid = i.pid
-                break
-        os.system(f"pssuspend64 {pid} >nul 2>&1")
+        os.system("pssuspend ESurfingClient.exe >nul 2>&1")
+        os.system("pssuspend64 ESurfingClient.exe >nul 2>&1")
         logger.info('Login successfully.')
 
     def watch(self):
         self.start()
+        bad = 0
         while True:
             result = self.check(self.server)
-            if result is not NetworkResult.NORMAL:
+            if result is NetworkResult.NEED_LOGIN or bad >= self.retry:
                 self.stop()
                 self.start()
+            elif result is NetworkResult.BAD_CONNECTION:
+                bad += 1
+            elif result is NetworkResult.NORMAL:
+                bad = 0
             time.sleep(self.interval)
 
 
