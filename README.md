@@ -33,7 +33,7 @@
 
 先安装好相应的依赖
 
-```pip install nuitka httpx pywin32 psutil loguru```
+```pip install nuitka httpx pywin32 loguru```
 
 安装后开始打包编译
 
