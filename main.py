@@ -17,6 +17,7 @@ class NetworkResult(Enum):
     NORMAL = 0
     NEED_LOGIN = 1
     BAD_CONNECTION = -1
+    LOCKED = -139
 
 
 class ESurfingDaemon(object):
@@ -48,10 +49,10 @@ class ESurfingDaemon(object):
     def stop():
         os.system('taskkill /f /im ESurfingClient.exe >nul 2>&1')
 
+    # noinspection PyUnusedLocal
     @staticmethod
-    def signal_handler(_, __):
-        os.system("pssuspend -r ESurfingClient.exe >nul 2>&1")
-        os.system("pssuspend64 -r ESurfingClient.exe >nul 2>&1")
+    def signal_handler(signum, frame):
+        os.system("pssuspend -r ESurfingClient.exe >nul 2>&1 || pssuspend64 -r ESurfingClient.exe >nul 2>&1")
         sys.exit(0)
 
     def check(self, url, disable=False):
@@ -59,7 +60,11 @@ class ESurfingDaemon(object):
         try:
             response = self.client.get(url)
             if response.status_code == 302 and not disable:
-                logger.warning("Session is expired. Now relaunch the client.")
+                response = self.client.get(response.headers["Location"])
+                if "限制" in response.text:
+                    logger.warning("You account has been disabled! Please set a new MAC address and try again.")
+                else:
+                    logger.warning("Session is expired. Now relaunch the client.")
             return NetworkResult.NORMAL if response.status_code == 404 else NetworkResult.NEED_LOGIN
         except:
             if not disable:
@@ -89,8 +94,7 @@ class ESurfingDaemon(object):
             time.sleep(0.5)
         self.running = False
         win32gui.ShowWindow(self.hwnd, SW_MINIMIZE)
-        os.system("pssuspend ESurfingClient.exe >nul 2>&1")
-        os.system("pssuspend64 ESurfingClient.exe >nul 2>&1")
+        os.system("pssuspend ESurfingClient.exe >nul 2>&1 || pssuspend64 ESurfingClient.exe >nul 2>&1")
         logger.info('Login successfully.')
 
     def watch(self):
@@ -105,7 +109,10 @@ class ESurfingDaemon(object):
                 bad += 1
             elif result is NetworkResult.NORMAL:
                 bad = 0
+            elif result is NetworkResult.LOCKED:
+                break
             time.sleep(self.interval)
 
 
 ESurfingDaemon().watch()
+os.system("pause")
